@@ -305,8 +305,12 @@ async def handle_post_client_download(datastar_signals: ReadSignals):
 
 async def consume_download(signals: Signals) -> None:
     """Process the download without tying it to an SSE connection."""
-    async for _ in gen_download(signals):
-        pass
+    client = Client.get_instance(signals.client_id)
+    if client is None:
+        return
+    async with client.download_lock:
+        async for _ in gen_download(signals):
+            pass
 
 
 def start_background_download(signals: Signals) -> bool:
@@ -363,7 +367,8 @@ async def gen_download(signals: Signals):
         if not songs:
             raise ValueError("No songs found for this URL.")
 
-        client.downloader.progress_handler.set_song_count(len(songs))
+        progress = client.downloader.progress_handler
+        progress.set_song_count(progress.song_count + len(songs))
         failed = False
         for song in songs:
             try:

@@ -13,6 +13,7 @@ def make_client():
     client = Client.__new__(Client)
     client.client_id = "background-test"
     client.download_tasks = set()
+    client.download_lock = asyncio.Lock()
     client.disconnect_timer = None
     return client
 
@@ -92,3 +93,42 @@ async def test_background_failure_is_retrieved_and_logged(monkeypatch):
 
     assert not client.download_tasks
     logger.error.assert_called_once()
+
+
+async def test_queues_for_one_client_run_sequentially(monkeypatch):
+    client = make_client()
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    order = []
+
+    async def fake_download(signals):
+        order.append(signals.song_url)
+        if signals.song_url == "first":
+            first_started.set()
+            await release_first.wait()
+        yield "finished"
+
+    monkeypatch.setattr(routes, "gen_download", fake_download)
+    monkeypatch.setattr(routes.Client, "get_instance", lambda _: client)
+    monkeypatch.setattr(app_state, "logger", logging.getLogger("test"), raising=False)
+
+    first = Signals()
+    first.client_id = client.client_id
+    first.song_url = "first"
+    second = Signals()
+    second.client_id = client.client_id
+    second.song_url = "second"
+
+    assert routes.start_background_download(first)
+    await asyncio.wait_for(first_started.wait(), timeout=1)
+    assert routes.start_background_download(second)
+    await asyncio.sleep(0)
+    tasks = list(client.download_tasks)
+
+    try:
+        assert order == ["first"]
+    finally:
+        release_first.set()
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=1)
+
+    assert order == ["first", "second"]
