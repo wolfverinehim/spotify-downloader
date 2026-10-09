@@ -363,6 +363,7 @@ async def gen_download(signals: Signals):
         if not songs:
             raise ValueError("No songs found for this URL.")
 
+        client.downloader.progress_handler.set_song_count(len(songs))
         failed = False
         for song in songs:
             try:

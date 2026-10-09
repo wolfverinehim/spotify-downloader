@@ -18,7 +18,11 @@ async def test_download_every_song(monkeypatch, count):
     download = AsyncMock(return_value=(songs[0], Path("song.mp3")))
     client = SimpleNamespace(
         downloader_settings={"output": "{title}.{output-ext}"},
-        downloader=SimpleNamespace(settings={}, pool_download=download),
+        downloader=SimpleNamespace(
+            settings={},
+            pool_download=download,
+            progress_handler=Mock(),
+        ),
     )
     monkeypatch.setattr(routes, "parse_query", parse)
     monkeypatch.setattr(routes.Client, "get_instance", lambda _: client)
@@ -42,6 +46,7 @@ async def test_download_every_song(monkeypatch, count):
     events = [event async for event in routes.gen_download(signals)]
 
     assert events
+    client.downloader.progress_handler.set_song_count.assert_called_once_with(count)
     assert download.await_count == count
     assert [call.args[0] for call in download.await_args_list] == songs
     assert parse.call_args.args[0] == [f"https://open.spotify.com/{resource}/example"]
@@ -54,7 +59,11 @@ async def test_song_failure_does_not_stop_playlist(monkeypatch):
     )
     client = SimpleNamespace(
         downloader_settings={"output": "{title}.{output-ext}"},
-        downloader=SimpleNamespace(settings={}, pool_download=download),
+        downloader=SimpleNamespace(
+            settings={},
+            pool_download=download,
+            progress_handler=Mock(),
+        ),
     )
     monkeypatch.setattr(routes, "parse_query", Mock(return_value=songs))
     monkeypatch.setattr(routes.Client, "get_instance", lambda _: client)
