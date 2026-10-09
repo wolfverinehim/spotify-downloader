@@ -22,7 +22,12 @@ from spotdl.types.song import Song
 from spotdl.utils.config import get_spotdl_path
 from spotdl.utils.ffmpeg import FFMPEG_FORMATS
 from spotdl.utils.search import get_search_results
-from spotdl.utils.web import Client, app_state, validate_search_term
+from spotdl.utils.web import (
+    Client,
+    app_state,
+    normalize_spotify_url,
+    validate_search_term,
+)
 from spotdl.web.utils import Signals, handle_signals
 
 __all__ = ["router"]
@@ -128,6 +133,7 @@ async def handle_get_client_search(datastar_signals: ReadSignals):
     app_state.logger.info("Loading search...")
     signals = handle_signals(datastar_signals)
     app_state.logger.info(f"[{signals.client_id}] Search term: {signals.search_term}")
+    signals.search_term = normalize_spotify_url(signals.search_term)
     is_valid_url = validate_search_term(signals.search_term)
 
     if is_valid_url:

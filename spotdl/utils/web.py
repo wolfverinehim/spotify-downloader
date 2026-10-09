@@ -6,9 +6,11 @@ FastAPI routes/classes etc.
 import asyncio
 import logging
 import mimetypes
+import re
 import threading
 from argparse import Namespace
 from typing import Any, Dict, Optional, Union
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.staticfiles import StaticFiles
@@ -288,6 +290,24 @@ def fix_mime_types():
     mimetypes.add_type("text/css", ".css")
     mimetypes.add_type("image/svg+xml", ".svg")
     mimetypes.add_type("text/html", ".html")
+
+
+def normalize_spotify_url(value: str) -> str:
+    """Remove the locale prefix from public Spotify URLs."""
+    stripped = value.strip()
+    try:
+        parts = urlsplit(stripped)
+    except ValueError:
+        return value
+
+    if (
+        parts.scheme not in ("http", "https")
+        or parts.netloc.lower() != "open.spotify.com"
+    ):
+        return value
+
+    path = re.sub(r"^/intl-[A-Za-z0-9-]+/", "/", parts.path)
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
 
 
 def validate_search_term(search_term: str) -> bool:
