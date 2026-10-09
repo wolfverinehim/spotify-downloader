@@ -27,6 +27,7 @@ from spotdl.utils.web import (
     normalize_spotify_url,
     validate_search_term,
 )
+from spotdl.utils.web_folders import folder_destination, music_folders
 from spotdl.web.utils import Signals, handle_signals
 
 __all__ = ["router"]
@@ -181,7 +182,8 @@ async def handle_get_client_downloads(datastar_signals: ReadSignals):
         )
         yield SSE.patch_elements(
             templates.get_template("download-list.html.j2").render(
-                client_song_downloads=client_song_downloads.values()
+                client_song_downloads=client_song_downloads.values(),
+                download_status=getattr(client, "download_status", {}),
             )
         )
         await asyncio.sleep(1)
@@ -318,6 +320,9 @@ def start_background_download(signals: Signals) -> bool:
     client = Client.get_instance(signals.client_id)
     if client is None:
         return False
+    signals.download_output = (
+        getattr(client, "music_output", None) or client.downloader_settings["output"]
+    )
     client.start_download(consume_download(signals))
     return True
 
@@ -344,12 +349,24 @@ async def gen_download(signals: Signals):
         """)
 
     if app_state.web_settings.get("web_use_output_dir", False):
-        client.downloader.settings["output"] = client.downloader_settings["output"]
+        client.downloader.settings["output"] = (
+            signals.download_output
+            or getattr(client, "music_output", None)
+            or client.downloader_settings["output"]
+        )
     else:
         client.downloader.settings["output"] = str(
             (get_spotdl_path() / f"web/sessions/{client.client_id}").absolute()
         )
 
+    client.download_status = {
+        "phase": "Reading song or playlist",
+        "total": 0,
+        "processed": 0,
+        "failures": 0,
+        "song": "",
+        "output": client.downloader.settings["output"],
+    }
     try:
         songs = await asyncio.to_thread(
             parse_query,
@@ -369,16 +386,24 @@ async def gen_download(signals: Signals):
         progress = client.downloader.progress_handler
         progress.set_song_count(progress.song_count + len(songs))
         failed = False
+        client.download_status.update(phase="Downloading", total=len(songs))
         for song in songs:
+            client.download_status["song"] = song.name
+            song_failed = False
             try:
                 _, path = await client.downloader.pool_download(song)
                 if path is None:
                     failed = True
+                    song_failed = True
                     app_state.logger.error("Failure downloading %s", song.name)
             except Exception:
                 failed = True
+                song_failed = True
                 app_state.logger.exception("Error downloading %s", song.name)
 
+            client.download_status["processed"] += 1
+            client.download_status["failures"] += int(song_failed)
+        client.download_status["phase"] = "Finished"
         icon = "clarity:error-line" if failed else "clarity:check-line"
         yield SSE.patch_elements(
             f'<button id="download-{signals.song_url}" '
@@ -387,6 +412,9 @@ async def gen_download(signals: Signals):
             "</iconify-icon></button>"
         )
     except Exception:
+        client.download_status["phase"] = (
+            "Failed to read or process this request; check server logs"
+        )
         app_state.logger.exception("Error processing download request")
 
 
@@ -419,6 +447,18 @@ async def handle_get_client_component_settings(datastar_signals: ReadSignals):
             AUDIO_PROVIDERS=AUDIO_PROVIDERS,
             LYRICS_PROVIDERS=LYRICS_PROVIDERS,
             FORMATS=FFMPEG_FORMATS.keys(),
+            selected_music_folder=(
+                Path(cast(str, client.music_output)).parent.name
+                if getattr(client, "music_output", None)
+                and client.music_output != app_state.downloader_settings["output"]
+                else ""
+            ),
+            folder_picker=app_state.web_settings.get("web_use_output_dir", False),
+            music_folders=(
+                music_folders(app_state.downloader_settings["output"])
+                if app_state.web_settings.get("web_use_output_dir", False)
+                else []
+            ),
         )
     )
     # spotify_client = SpotifyClient()
@@ -458,3 +498,29 @@ async def handle_client_component_search_input_rotating_placeholder():
         index += 1
         if index >= len(placeholder_items):
             index = 0
+
+
+@router.post("/client/music-folder")
+@datastar_response
+async def handle_music_folder(datastar_signals: ReadSignals):
+    """Apply a confined destination to future requests in this session."""
+    signals = handle_signals(datastar_signals)
+    client = Client.get_instance(signals.client_id)
+    if client is None or not app_state.web_settings.get("web_use_output_dir", False):
+        return
+    try:
+        name = signals.new_music_folder.strip() or signals.music_folder
+        client.music_output = folder_destination(
+            app_state.downloader_settings["output"],
+            name,
+            create=bool(signals.new_music_folder.strip()),
+        )
+        yield SSE.patch_elements(
+            templates.get_template("folder-status.html.j2").render(
+                output=client.music_output
+            )
+        )
+    except (ValueError, OSError) as error:
+        yield SSE.patch_elements(
+            templates.get_template("folder-status.html.j2").render(error=str(error))
+        )

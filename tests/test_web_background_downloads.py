@@ -15,6 +15,7 @@ def make_client():
     client.download_tasks = set()
     client.download_lock = asyncio.Lock()
     client.disconnect_timer = None
+    client.downloader_settings = {"output": "{artists} - {title}.{output-ext}"}
     return client
 
 
@@ -198,3 +199,21 @@ def test_missing_session_does_not_start_download(monkeypatch):
     signals = Signals()
     signals.client_id = "expired"
     assert routes.start_background_download(signals) is False
+
+
+async def test_destination_is_captured_before_queue_runs(monkeypatch):
+    client = make_client()
+    client.music_output = "/music/chosen/{title}.mp3"
+    captured = []
+
+    async def fake_download(signals):
+        captured.append(signals.download_output)
+        yield "finished"
+
+    monkeypatch.setattr(routes, "gen_download", fake_download)
+    monkeypatch.setattr(routes.Client, "get_instance", lambda _: client)
+    signals = Signals()
+    assert routes.start_background_download(signals)
+    client.music_output = "/music/other/{title}.mp3"
+    await asyncio.gather(*client.download_tasks)
+    assert captured == ["/music/chosen/{title}.mp3"]

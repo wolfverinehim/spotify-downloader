@@ -1,6 +1,6 @@
 # Web download workflow fixes
 
-This branch fixes Spotify URL handling and the lifetime of downloads started from the web interface. It does not add the experimental folder picker or progress panel used in a private deployment.
+This branch fixes Spotify URL handling and the lifetime of downloads started from the web interface. It also provides a confined folder selector and queue summary shared by Windows and Docker deployments.
 
 ## Behavior
 
@@ -15,7 +15,7 @@ This branch fixes Spotify URL handling and the lifetime of downloads started fro
 
 Downloads are in-memory tasks, not durable jobs. A server restart does not resume a queue. Cancelling a coroutine does not guarantee immediate termination of synchronous work already running through `asyncio.to_thread`; network metadata work may finish later. Shutdown tests cover coroutine ordering, not termination of every external downloader subprocess.
 
-Repeated submissions are separate queues; URL deduplication and queue limits are not introduced here. Settings are read when a queued download starts, not captured at submission. Existing download progress views remain in use; additional progress UI and destination selection are separate work.
+Repeated submissions are separate queues; URL deduplication and queue limits are not introduced here. The destination is captured at submission; other settings are read when a queued download starts.
 
 ## Implementation
 
@@ -64,7 +64,7 @@ The locked yt-dlp version produced a YouTube HTTP 403 in a direct download test 
 
 On 2026-10-09, in Linux with Python 3.12.14 and the frozen repository dependencies:
 
-- Focused regression suite: **35 passed**, with an existing Starlette multipart deprecation warning.
+- Focused regression suite: **46 passed**, with an existing Starlette multipart deprecation warning.
 - Mypy: **no issues in 60 source files**.
 - Pylint: **10.00/10** for the entire `spotdl` package with CI options.
 - Black and isort checks: passed for the entire package.
@@ -74,7 +74,7 @@ Black reports that the interpreter is older than the inferred Python 3.14 target
 
 ## Contribution policy
 
-The upstream `docs/CONTRIBUTING.md` explicitly prohibits AI-generated code and AI-generated issue or pull-request text. These follow-up changes and this document were prepared with AI assistance for the user's fork. They should not be submitted upstream as a compliant human-authored contribution. The earlier draft PR attempt through the connector was rejected with HTTP 403; it did not create a PR.
+The upstream `docs/CONTRIBUTING.md` explicitly prohibits AI-generated code and AI-generated issue or pull-request text. These follow-up changes and this document were prepared with AI assistance for the user's fork. They should not be submitted upstream as a compliant human-authored contribution. 
 
 ### Broader CI-style test comparison
 
@@ -107,3 +107,32 @@ git merge --ff-only fork/fix/web-download-workflow
 ```
 
 This updates the contribution checkout only. Existing Docker images and the Raspberry deployment are not automatically rebuilt. Keep the previously working image available when testing a replacement.
+
+
+## Folder selection and queue feedback
+
+The Settings dialog now lists direct child folders of the server's configured output root when `--web-use-output-dir` is enabled. Apply an existing folder or enter a new folder name and click **Apply folder / create**. An empty choice restores the configured output template. Custom folders use `{artists} - {title}.{output-ext}`. Selection is per browser client session and applies only to future submissions. Each submission captures its destination before entering the background queue. Reopen Settings to refresh the folder list after creation.
+
+The Downloads page shows the current request phase, current song, processed/total songs, failure count, destination and a progress bar. Per-song cards retain their existing download/conversion feedback. Reading failures are shown in the summary and logged with a traceback. Queue progress measures processed songs, including failed songs; it is not a byte transfer percentage.
+
+Folder names cannot contain path separators, filename-template braces, reserved Windows device names or invalid filename characters. Symbolic link destinations are excluded. The selector remains within the server's configured music root. The server filesystem determines which folders are available, including mounted NAS directories.
+
+## Run the same branch on Windows and Raspberry Pi
+
+Windows, from the existing checkout:
+
+```powershell
+git pull --ff-only fork fix/web-download-workflow
+uv sync --frozen
+uv run spotdl web --host 127.0.0.1 --port 8801 --web-use-output-dir --output "$env:USERPROFILE/Music/spotdl-test/{artist}/{album}/{title}.{output-ext}"
+```
+
+On Raspberry Pi, clone this fork into a new directory, check out `fix/web-download-workflow`, and build its Dockerfile instead of applying the previous patch scripts:
+
+```bash
+git clone --branch fix/web-download-workflow https://github.com/wolfverinehim/spotify-downloader.git spotdl-unified
+cd spotdl-unified
+docker build -t spotdl-local:unified-v1 .
+```
+
+In the existing Portainer stack, change the image to `spotdl-local:unified-v1`, set `pull_policy: never`, and preserve the `/music` bind mount and external Caddy network. Keep `--web-use-output-dir` and your output template. Do not request an image repull: this image is built locally. Verify `docker inspect spotdl --format '{{.Config.Image}}'` after updating the stack. Dependency or YouTube service errors still require separate diagnosis; these changes do not guarantee every video can be downloaded.

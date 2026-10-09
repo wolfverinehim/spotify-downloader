@@ -120,6 +120,8 @@ class Client:
         self.disconnect_timer = None
         self.download_tasks: Set[asyncio.Task] = set()
         self.download_lock = asyncio.Lock()
+        self.music_output: Optional[str] = None
+        self.download_status: Dict[str, Any] = {}
 
     def start_download(self, coroutine: Coroutine[Any, Any, None]) -> asyncio.Task:
         """Keep a download alive independently of its HTTP request."""
