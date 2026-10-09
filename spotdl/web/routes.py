@@ -18,10 +18,9 @@ from fastapi.templating import Jinja2Templates
 
 from spotdl._version import __version__
 from spotdl.download.downloader import AUDIO_PROVIDERS, LYRICS_PROVIDERS
-from spotdl.types.song import Song
 from spotdl.utils.config import get_spotdl_path
 from spotdl.utils.ffmpeg import FFMPEG_FORMATS
-from spotdl.utils.search import get_search_results
+from spotdl.utils.search import get_search_results, parse_query
 from spotdl.utils.web import (
     Client,
     app_state,
@@ -325,25 +324,42 @@ async def gen_download(signals: Signals):
         )
 
     try:
-        # Fetch song metadata
-        song = Song.from_url(signals.song_url)
-        app_state.logger.info(f"Downloading song: {song}")
 
-        # Download Song
-        _, path = await client.downloader.pool_download(song)
-        yield SSE.patch_elements(f"""
-            <button id="download-{signals.song_url}" class="btn btn-primary btn-square">
-                    <iconify-icon icon="clarity:check-line" style="font-size: 24px"></iconify-icon>
-                </button>
-        """)
+        songs = await asyncio.to_thread(
+            parse_query,
+            [normalize_spotify_url(signals.song_url)],
+            threads=1,
+            use_ytm_data=client.downloader_settings.get("ytm_data", False),
+            playlist_numbering=client.downloader_settings.get(
+                "playlist_numbering", False
+            ),
+            playlist_retain_track_cover=client.downloader_settings.get(
+                "playlist_retain_track_cover", False
+            ),
+        )
+        if not songs:
+            raise ValueError("No songs found for this URL.")
 
-        if path is None:
-            app_state.logger.error(f"Failure downloading {song.name}")
+        failed = False
+        for song in songs:
+            try:
+                _, path = await client.downloader.pool_download(song)
+                if path is None:
+                    failed = True
+                    app_state.logger.error("Failure downloading %s", song.name)
+            except Exception:
+                failed = True
+                app_state.logger.exception("Error downloading %s", song.name)
 
-        # return str(path.absolute())
-
-    except Exception as exception:
-        app_state.logger.error(f"Error downloading! {exception}")
+        icon = "clarity:error-line" if failed else "clarity:check-line"
+        yield SSE.patch_elements(
+            f'<button id="download-{signals.song_url}" '
+            f'class="btn btn-primary btn-square">'
+            f'<iconify-icon icon="{icon}" style="font-size: 24px">'
+            "</iconify-icon></button>"
+        )
+    except Exception:
+        app_state.logger.exception("Error processing download request")
 
 
 # COMPONENTS
