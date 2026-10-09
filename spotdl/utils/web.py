@@ -7,7 +7,6 @@ import asyncio
 import logging
 import mimetypes
 import re
-import threading
 from argparse import Namespace
 from typing import Any, Coroutine, Dict, Optional, Set, Union
 from urllib.parse import urlsplit, urlunsplit
@@ -79,7 +78,7 @@ class Client:
     client_id: str
     downloader: Downloader
     downloader_settings: DownloaderOptions
-    disconnect_timer: Optional[threading.Timer] = None
+    disconnect_timer: Optional[asyncio.TimerHandle] = None
     # update_callback: Optional[Callable] = None
     # update_stack: list[Dict[str, Any]] = []
 
@@ -152,7 +151,7 @@ class Client:
         # await self.websocket.accept()
 
         # Add the connection to the list of connections
-        if self.disconnect_timer and self.disconnect_timer.is_alive():
+        if self.disconnect_timer is not None:
             self.disconnect_timer.cancel()
             self.disconnect_timer = None
         app_state.clients[self.client_id] = self
@@ -164,15 +163,16 @@ class Client:
         """
 
         # If the disconnect timer is running, cancel it
-        if self.disconnect_timer and self.disconnect_timer.is_alive():
+        if self.disconnect_timer is not None:
             self.disconnect_timer.cancel()
 
         # Schedule the disconnect now
         app_state.logger.info(
             "Client %s will disconnect in 15 seconds of inactivity", self.client_id
         )
-        self.disconnect_timer = threading.Timer(15, self.disconnect_now)
-        self.disconnect_timer.start()
+        self.disconnect_timer = asyncio.get_running_loop().call_later(
+            15, self.disconnect_now
+        )
 
     def disconnect_now(self):
         """
@@ -180,8 +180,9 @@ class Client:
         """
         # Retain an inactive client until its downloads finish.
         if any(not task.done() for task in self.download_tasks):
-            self.disconnect_timer = threading.Timer(15, self.disconnect_now)
-            self.disconnect_timer.start()
+            self.disconnect_timer = asyncio.get_running_loop().call_later(
+                15, self.disconnect_now
+            )
             return
 
         # Remove the connection from the list of connections

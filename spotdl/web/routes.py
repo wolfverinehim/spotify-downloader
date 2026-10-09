@@ -351,7 +351,6 @@ async def gen_download(signals: Signals):
         )
 
     try:
-
         songs = await asyncio.to_thread(
             parse_query,
             [normalize_spotify_url(signals.song_url)],
