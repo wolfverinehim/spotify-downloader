@@ -136,3 +136,8 @@ docker build -t spotdl-local:unified-v1 .
 ```
 
 In the existing Portainer stack, change the image to `spotdl-local:unified-v1`, set `pull_policy: never`, and preserve the `/music` bind mount and external Caddy network. Keep `--web-use-output-dir` and your output template. Do not request an image repull: this image is built locally. Verify `docker inspect spotdl --format '{{.Config.Image}}'` after updating the stack. Dependency or YouTube service errors still require separate diagnosis; these changes do not guarantee every video can be downloaded.
+
+
+## Search feedback
+
+Text search now reports empty results, provider exceptions and a 45-second response timeout instead of leaving the Loading screen indefinitely. A timeout stops waiting for the response; it cannot terminate synchronous provider work already running in a worker thread. The search placeholder and result use the same HTML element type. These changes are covered by three regression cases (49 focused tests pass). They do not resolve YouTube audio provider failures.

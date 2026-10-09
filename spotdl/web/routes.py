@@ -150,12 +150,28 @@ async def handle_get_client_search(datastar_signals: ReadSignals):
             )
         return
 
-    songs = await asyncio.to_thread(get_search_results, signals.search_term)
-    yield SSE.patch_elements(
-        templates.get_template("search-list.html.j2").render(
-            songs=songs,
+    try:
+        songs = await asyncio.wait_for(
+            asyncio.to_thread(get_search_results, signals.search_term), timeout=45
         )
-    )
+        app_state.logger.info("Search returned %s songs", len(songs))
+        yield SSE.patch_elements(
+            templates.get_template("search-list.html.j2").render(songs=songs)
+        )
+    except asyncio.TimeoutError:
+        app_state.logger.warning("Search timed out: %s", signals.search_term)
+        yield SSE.patch_elements(
+            templates.get_template("search-error.html.j2").render(
+                message="Spotify search did not respond within 45 seconds. Try again or paste a Spotify URL."
+            )
+        )
+    except Exception:
+        app_state.logger.exception("Web search failed: %s", signals.search_term)
+        yield SSE.patch_elements(
+            templates.get_template("search-error.html.j2").render(
+                message="Unable to retrieve search results. Check the server log or try a Spotify URL."
+            )
+        )
 
 
 @router.get("/client/downloads")
