@@ -9,7 +9,7 @@ import mimetypes
 import re
 import threading
 from argparse import Namespace
-from typing import Any, Dict, Optional, Union
+from typing import Any, Coroutine, Dict, Optional, Set, Union
 from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import FastAPI, HTTPException, Query, Response
@@ -119,6 +119,29 @@ class Client:
         )
 
         self.disconnect_timer = None
+        self.download_tasks: Set[asyncio.Task] = set()
+
+    def start_download(self, coroutine: Coroutine[Any, Any, None]) -> asyncio.Task:
+        """Keep a download alive independently of its HTTP request."""
+        task = asyncio.create_task(coroutine)
+        self.download_tasks.add(task)
+        task.add_done_callback(self._download_finished)
+        return task
+
+    def _download_finished(self, task: asyncio.Task) -> None:
+        """Release completed tasks and retrieve unhandled exceptions."""
+        self.download_tasks.discard(task)
+        if not task.cancelled():
+            exception = task.exception()
+            if exception is not None:
+                app_state.logger.error(
+                    "Background download failed",
+                    exc_info=(
+                        type(exception),
+                        exception,
+                        exception.__traceback__,
+                    ),
+                )
 
     async def connect(self):
         """
@@ -154,6 +177,12 @@ class Client:
         """
         Disconnect the client.
         """
+        # Retain an inactive client until its downloads finish.
+        if any(not task.done() for task in self.download_tasks):
+            self.disconnect_timer = threading.Timer(15, self.disconnect_now)
+            self.disconnect_timer.start()
+            return
+
         # Remove the connection from the list of connections
         if self.client_id in app_state.clients:
             # app_state.clients.pop(client_id, None)

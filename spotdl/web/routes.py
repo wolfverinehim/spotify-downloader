@@ -140,12 +140,16 @@ async def handle_get_client_search(datastar_signals: ReadSignals):
         app_state.logger.info(
             f"[{signals.client_id}] Valid URL detected, redirecting to downloads..."
         )
-        yield SSE.redirect("/downloads")
         signals.song_url = signals.search_term
-        async for update in gen_download(signals):
-            yield update
+        if start_background_download(signals):
+            yield SSE.redirect("/downloads")
+        else:
+            yield SSE.patch_elements(
+                templates.get_template("status-disconnected.html.j2").render()
+            )
+        return
 
-    songs = get_search_results(signals.search_term)
+    songs = await asyncio.to_thread(get_search_results, signals.search_term)
     yield SSE.patch_elements(
         templates.get_template("search-list.html.j2").render(
             songs=songs,
@@ -288,11 +292,30 @@ async def handle_post_client_download(datastar_signals: ReadSignals):
     Handle the download request from the client.
     """
     signals = handle_signals(datastar_signals)
-    async for update in gen_download(signals):
-        yield update
+    if start_background_download(signals):
+        yield SSE.redirect("/downloads")
+    else:
+        yield SSE.patch_elements(
+            templates.get_template("status-disconnected.html.j2").render()
+        )
 
 
 # HELPERS
+
+
+async def consume_download(signals: Signals) -> None:
+    """Process the download without tying it to an SSE connection."""
+    async for _ in gen_download(signals):
+        pass
+
+
+def start_background_download(signals: Signals) -> bool:
+    """Start a download before returning a redirect to the browser."""
+    client = Client.get_instance(signals.client_id)
+    if client is None:
+        return False
+    client.start_download(consume_download(signals))
+    return True
 
 
 async def gen_download(signals: Signals):
