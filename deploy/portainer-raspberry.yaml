@@ -27,8 +27,10 @@ services:
         bind:
           create_host_path: false
     networks:
+      - default
       - caddy-admin
 
 networks:
+  default: {}
   caddy-admin:
     external: true
