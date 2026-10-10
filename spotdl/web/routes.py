@@ -20,7 +20,7 @@ from spotdl._version import __version__
 from spotdl.download.downloader import AUDIO_PROVIDERS, LYRICS_PROVIDERS
 from spotdl.utils.config import get_spotdl_path
 from spotdl.utils.ffmpeg import FFMPEG_FORMATS
-from spotdl.utils.search import get_search_results, parse_query
+from spotdl.utils.search import parse_query
 from spotdl.utils.web import (
     Client,
     app_state,
@@ -28,6 +28,7 @@ from spotdl.utils.web import (
     validate_search_term,
 )
 from spotdl.utils.web_folders import folder_destination, music_folders
+from spotdl.utils.web_search import get_search_results
 from spotdl.web.utils import Signals, handle_signals
 
 __all__ = ["router"]

@@ -141,3 +141,18 @@ In the existing Portainer stack, change the image to `spotdl-local:unified-v1`, 
 ## Search feedback
 
 Text search now reports empty results, provider exceptions and a 45-second response timeout instead of leaving the Loading screen indefinitely. A timeout stops waiting for the response; it cannot terminate synchronous provider work already running in a worker thread. The search placeholder and result use the same HTML element type. These changes are covered by three regression cases (49 focused tests pass). They do not resolve YouTube audio provider failures.
+
+### Lightweight text search previews
+
+Web text searches now render track titles, artists, album names and artwork directly
+from Spotify search results. They no longer call `Song.from_url` for every card,
+which previously fetched track, artist and album metadata serially before displaying
+anything. A Raspberry Pi traceback for `perales` showed that this enrichment was
+waiting in spotapi client-token acquisition during an album request.
+
+Selecting Download still sends the canonical Spotify track URL to the existing
+background queue, where full metadata is resolved. The 45-second search timeout
+and visible provider error remain; this change does not guarantee Spotify network
+requests or YouTube downloads will succeed. Regression tests cover preview-only
+lookup, missing optional metadata, and provider errors. No live Raspberry Pi search
+has been verified for this change yet.
